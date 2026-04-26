@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>AI-CRV Composite Risk Engine – Mathematical Specification V2.1</title>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" id="MathJax-script" async></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background-color: #f5f7fb;
+            font-family: 'Segoe UI', 'Roboto', 'Georgia', 'Times New Roman', serif;
+            line-height: 1.5;
+            color: #1a2a3a;
+            padding: 2rem 1rem;
+        }
+        .document-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);
+            padding: 2rem 2rem 3rem;
+        }
+        h1 {
+            font-size: 2.2rem;
+            border-bottom: 3px solid #2c5282;
+            padding-bottom: 0.5rem;
+            margin-top: 1rem;
+            margin-bottom: 1rem;
+            color: #1a365d;
+        }
+        h2 {
+            font-size: 1.6rem;
+            margin-top: 1.8rem;
+            margin-bottom: 0.75rem;
+            color: #2b6cb0;
+            border-left: 4px solid #2b6cb0;
+            padding-left: 1rem;
+        }
+        h3 {
+            font-size: 1.3rem;
+            margin-top: 1.4rem;
+            margin-bottom: 0.5rem;
+            color: #2d3748;
+            font-weight: 600;
+        }
+        .subtitle {
+            color: #4a5568;
+            margin-bottom: 2rem;
+            font-style: italic;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 0.5rem;
+        }
+        p, li, .equation-block {
+            margin-bottom: 0.75rem;
+        }
+        .equation-block {
+            margin: 1rem 0;
+            overflow-x: auto;
+            padding: 0.5rem 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1.5rem 0;
+            background: #fefefe;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+        th, td {
+            border: 1px solid #cbd5e0;
+            padding: 0.6rem 0.8rem;
+            text-align: left;
+            vertical-align: top;
+        }
+        th {
+            background-color: #edf2f7;
+            font-weight: 600;
+            color: #1e3a5f;
+        }
+        code {
+            background: #f1f5f9;
+            padding: 0.2rem 0.4rem;
+            border-radius: 0.25rem;
+            font-family: 'SF Mono', 'Consolas', monospace;
+            font-size: 0.9em;
+        }
+        .note-box {
+            background: #e6f7ff;
+            border-left: 4px solid #3182ce;
+            padding: 0.8rem 1.2rem;
+            margin: 1.2rem 0;
+            border-radius: 0.5rem;
+        }
+        .alert-badge {
+            font-family: monospace;
+            background: #1a202c;
+            color: white;
+            padding: 0.2rem 0.5rem;
+            border-radius: 0.3rem;
+            font-size: 0.8rem;
+        }
+        footer {
+            margin-top: 2.5rem;
+            font-size: 0.8rem;
+            text-align: center;
+            color: #718096;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 1.5rem;
+        }
+        @media (max-width: 700px) {
+            .document-container {
+                padding: 1rem;
+            }
+            h1 { font-size: 1.8rem; }
+            h2 { font-size: 1.4rem; }
+            th, td { padding: 0.4rem; }
+        }
+        .math {
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+<div class="document-container">
+    <h1>AI-CRV Composite Risk Verification Engine<br><span style="font-size: 1.2rem;">Corrected Mathematical Specification – v2.1</span></h1>
+    <div class="subtitle">Document aligns with updated JS implementation (patent pending – SiteShield.ai)</div>
+
+    <!-- 1. Introduction -->
+    <h2>1. Introduction</h2>
+    <p>The AI-CRV engine fuses risk indicators from six independent modules into a single composite risk score \(S_{\text{final}} \in [0,100]\). Each module first normalizes raw sensor or operational data into a <strong>raw risk score</strong> \(S_i^{\text{raw}} \in [0,100]\). These are then smoothed via time‑aware exponential moving averages, fused using confidence‑weighted averaging, and finally subjected to an asymmetric multi‑level override and composite smoothing. The result is a robust, explainable, and temporally stable risk metric.</p>
+
+    <div class="note-box">
+        <strong>📐 Pipeline Steps (logical order, matching code comments):</strong><br>
+        1. Normalization → 2. Raw Confidence → 3. Per‑Module EMA Smoothing → 4. Confidence‑Weighted Fusion →<br>
+        5. Multi‑Level Override → 6. Composite EMA Smoothing → 7. Explainability (Contributions).
+    </div>
+
+    <!-- 2. Notation -->
+    <h2>2. Notation</h2>
+    \[
+    \begin{array}{ll}
+    i & \text{Module index: threat, ops, rigFloor, vehicle, radioactive, explosive} \\
+    S_i^{\text{raw}}(t) & \text{Raw normalized risk score of module }i\text{ at time }t \\
+    S_i^{\text{smooth}}(t) & \text{Smoothed risk score after per‑module EMA} \\
+    S_{\text{raw}}(t) & \text{Confidence‑weighted fusion result (before override)} \\
+    S_{\text{override}}(t) & \text{Score after multi‑level override} \\
+    S_{\text{instant}}(t) & \text{Instantaneous composite (override result)} \\
+    S_{\text{final}}(t) & \text{Final composite after temporal smoothing} \\
+    c_i^{\text{raw}}(t) & \text{Raw confidence of module }i\;(0\text{ to }1) \\
+    c_i^{\text{eff}}(t) & \text{Effective confidence for weighting }=\max(c_i^{\text{raw}},\text{softFloor}) \\
+    w_i & \text{Static weight assigned to module }i,\;\sum w_i = 1 \\
+    \alpha_i(t) & \text{Dynamic EMA smoothing factor for module }i \\
+    \tau_i & \text{Time constant for module }i\text{ (ms)} \\
+    \Delta t & \text{Time elapsed since last update }= t - t_{\text{prev}}
+    \end{array}
+    \]
+    <p>All scores and confidences are clamped to their respective ranges after every operation.</p>
+
+    <!-- 3. Layer 1 Normalization -->
+    <h2>3. Layer 1 – Module‑Specific Normalization</h2>
+    <p>Each module transforms its input data into a raw risk score \(S_i^{\text{raw}} \in [0,100]\). Default behaviours and fallback values are defined for missing or invalid inputs.</p>
+
+    <h3>3.1 Threat Module</h3>
+    <p><strong>Inputs:</strong> distance \(d\) [km], speed \(v\) [m/s], risk zone \(z \in \{\text{LOW},\text{MEDIUM},\text{HIGH}\}\), maximum distance \(D_{\max}\) (default 5 km).</p>
+    \[
+    \begin{aligned}
+    d' &= \min(d, D_{\max}) \\
+    \text{distanceFactor} &= 100 \cdot \frac{D_{\max} - d'}{D_{\max}} \\[4pt]
+    v' &= \min(v, 51) \\
+    \text{speedFactor} &= 100 \cdot \frac{v'}{51} \\[4pt]
+    \text{zoneFactor} &= 
+    \begin{cases}
+    30 & z = \text{HIGH} \\
+    15 & z = \text{MEDIUM} \\
+    0  & \text{otherwise}
+    \end{cases} \\[4pt]
+    S_{\text{threat}}^{\text{raw}} &= \text{round}\bigl(0.50 \cdot \text{distanceFactor} + 0.30 \cdot \text{speedFactor} + \text{zoneFactor}\bigr)
+    \end{aligned}
+    \]
+    <p>If no threat is detected, baseline score 5 is returned.</p>
+
+    <h3>3.2 Operational Hazards (Ops)</h3>
+    <p><strong>Input:</strong> list of hazard risk scores \(h_1,\dots,h_n\), each \(h_j\in[0,100]\). Let \(m = \max_j h_j\), \(\mu = \frac{1}{n}\sum h_j\). Blending weights \(\alpha_{\max}=0.60\), \(\alpha_{\text{avg}}=0.40\).</p>
+    \[
+    S_{\text{ops}}^{\text{raw}} = \text{round}\bigl(\alpha_{\max} \cdot m + \alpha_{\text{avg}} \cdot \mu\bigr)
+    \]
+    <p>If no hazards, default \(S=10\). If no active operation, default \(S=5\).</p>
+
+    <h3>3.3 Rig Floor Safety</h3>
+    <p><strong>Input:</strong> active detections with severity mapping: CRITICAL→35, HIGH→25, MEDIUM→15, LOW→8. Sum of mapped scores = \(Q\).</p>
+    \[
+    S_{\text{rig}}^{\text{raw}} = \text{round}\bigl(\min(Q, 100)\bigr)
+    \]
+    <p>If no active detections, default \(S=8\).</p>
+
+    <h3>3.4 Vehicle Safety</h3>
+    <p>For each moving vehicle, risk score \(r_k\). \(R_{\max} = \max_k r_k\), \(\bar r = \frac{1}{K}\sum r_k\). Blending \(\beta_{\max}=0.60\), \(\beta_{\text{avg}}=0.40\).</p>
+    \[
+    S_{\text{vehicle}}^{\text{raw}} = \text{round}\bigl(\beta_{\max} \cdot R_{\max} + \beta_{\text{avg}} \cdot \bar r\bigr)
+    \]
+    <p>If no moving vehicles, default \(S=5\).</p>
+
+    <h3>3.5 Radioactive Source</h3>
+    <p><strong>Inputs:</strong> location \(L\), cable tension \(T\) [kN], stuck threshold \(T_{\text{stuck}}\) (default 80).<br>
+    Base score \(B\):</p>
+    \[
+    B = \begin{cases}5 & L=\text{SHIELDED}\\50 & L=\text{EXTRACTED}\\70 & L=\text{UNKNOWN}\end{cases}
+    \qquad
+    F_T = 100 \cdot \min\!\left(1,\frac{T}{T_{\text{stuck}}}\right)
+    \]
+    \[
+    S_{\text{radio}}^{\text{raw}} = 
+    \begin{cases}
+    \min(100,\; B + 0.5F_T) & B \ge 50 \\
+    \min(100,\; B + 0.3F_T) & \text{otherwise}
+    \end{cases}
+    \]
+    <p><strong>Unconditional tension override:</strong> if \(F_T \ge 90\), then \(S_{\text{radio}}^{\text{raw}} = \max(S_{\text{radio}}^{\text{raw}}, 85)\).</p>
+    <p>Default \(S=5\) if module state missing.</p>
+
+    <h3>3.6 Explosive Device</h3>
+    <p><strong>Inputs:</strong> armed flag \(A\), depth \(D\), safe depth \(D_{\text{safe}}\) (default 500 m), sequence valid \(V\), rig tension \(T_{\text{rig}}\), max tension \(T_{\max}=500\) kN.</p>
+    \[
+    S_{\text{expl}}^{\text{raw}} = 
+    \begin{cases}
+    100 & V = \text{false} \\
+    100 & A = \text{true and } D < D_{\text{safe}} \\
+    60 + 30\left(1 - \frac{D}{D_{\text{safe}}}\right) + 0.2\cdot100\cdot\frac{\min(T_{\text{rig}},T_{\max})}{T_{\max}} & A = \text{true and } D \ge D_{\text{safe}} \\
+    5 & \text{otherwise (not armed)}
+    \end{cases}
+    \]
+
+    <!-- 4. Layer 2 -->
+    <h2>4. Layer 2 – Composite Inference Engine</h2>
+
+    <h3>4.1 Step 1: Normalization (already described above)</h3>
+    <p>Produces \(S_i^{\text{raw}}\) for all modules.</p>
+
+    <h3>4.2 Step 2: Raw Confidence \(c_i^{\text{raw}}\)</h3>
+    <p>Confidence is computed from recency, health, visibility, and model confidence factors:</p>
+    \[
+    c_i^{\text{raw}} = \text{clamp}\bigl( f_{\text{recency}} \cdot f_{\text{health}} \cdot f_{\text{visibility}} \cdot f_{\text{model}} ,\; 0,\; 1 \bigr)
+    \]
+    <ul>
+        <li>\(f_{\text{recency}} = 0.60\) if last update > 10 s else 1.0</li>
+        <li>\(f_{\text{health}} = 1.0\) (healthy), \(0.70\) (degraded), \(0.20\) (offline)</li>
+        <li>\(f_{\text{visibility}} = 1.0\) (normal), \(0.60\) (low)</li>
+        <li>\(f_{\text{model}} = \text{clamp}(\text{modelConfidence},0,1)\) if provided, else 1.0</li>
+    </ul>
+    <p>Modules with \(c_i^{\text{raw}} < \text{minModuleConfidence}\) (default 0.1) are <strong>excluded</strong> from fusion.</p>
+
+    <h3>4.3 Step 3: Per‑Module Temporal Smoothing (EMA)</h3>
+    <p>Let \(\bar S_i(t-1)\) be the previous smoothed value, \(t_{\text{prev}}\) last update timestamp. At current time \(t\) with raw score \(S_i^{\text{raw}}(t)\), compute smoothing factor:</p>
+    \[
+    \alpha_i(t) = 
+    \begin{cases}
+    1 - \exp\!\left(-\dfrac{\Delta t}{\tau_i}\right) & \text{if } \tau_i \text{ given and } \Delta t > 0 \\
+    \alpha_i^{\text{fixed}} & \text{otherwise}
+    \end{cases}
+    \quad\text{where }\Delta t = t - t_{\text{prev}}\text{ (ms)}
+    \]
+    \[
+    S_i^{\text{smooth}}(t) = \alpha_i(t) \cdot S_i^{\text{raw}}(t) + \bigl(1 - \alpha_i(t)\bigr) \cdot \bar S_i(t-1)
+    \]
+    <p>After updating, store \(\bar S_i(t) = S_i^{\text{smooth}}(t)\) and set \(t_{\text{prev}} = t\).</p>
+
+    <h3>4.4 Step 4: Confidence‑Weighted Fusion</h3>
+    <p>Active set \(\mathcal{A} = \{ i \mid c_i^{\text{raw}} \ge \text{minModuleConfidence} \}\). Effective confidence (also used for explainability):</p>
+    \[
+    c_i^{\text{eff}} = \max\bigl(c_i^{\text{raw}},\; \text{confidenceSoftFloor}\bigr) \quad (\text{default soft floor }0.2)
+    \]
+    <p>The raw fused score is:</p>
+    \[
+    S_{\text{raw}} = 
+    \begin{cases}
+    \dfrac{\sum_{i \in \mathcal{A}} S_i^{\text{smooth}} \cdot w_i \cdot c_i^{\text{eff}}}{\sum_{i \in \mathcal{A}} w_i \cdot c_i^{\text{eff}}} & \text{if denominator } \ge 0.01 \\[6pt]
+    \text{average of } \mathbf{S_i^{\text{raw}}} \text{ (module raw scores, not smoothed) for } i \in \mathcal{A} & \text{otherwise (fallback)}
+    \end{cases}
+    \]
+    <div class="note-box">
+        <strong>Clarification:</strong> The fallback uses the <em>module raw scores</em> \(S_i^{\text{raw}}\) (pre‑EMA) to avoid biasing the average with old, possibly outdated smoothed values when confidence is extremely low.
+    </div>
+
+    <h3>4.5 Step 5: Multi‑Level Critical Override</h3>
+    <p>Hybrid score per module: \(H_i = \max(S_i^{\text{raw}}, S_i^{\text{smooth}})\), and \(S_{\max} = \max_i H_i\).<br>
+    Thresholds and floors:</p>
+    \[
+    \begin{array}{c|c|c}
+    \text{Level} & \text{Threshold } \tau & \text{Floor } F \\ \hline
+    \text{warning} & 70 & 65 \\
+    \text{critical} & 80 & 75 \\
+    \text{emergency} & 90 & 85
+    \end{array}
+    \]
+    \[
+    S_{\text{override}} = 
+    \begin{cases}
+    \max(S_{\text{raw}}, F_{\text{emerg}}) & S_{\max} \ge 90 \\
+    \max(S_{\text{raw}}, F_{\text{crit}})  & \text{else if } S_{\max} \ge 80 \\
+    \max(S_{\text{raw}}, F_{\text{warn}})  & \text{else if } S_{\max} \ge 70 \\
+    S_{\text{raw}} & \text{otherwise}
+    \end{cases}
+    \]
+    <p>Emergency level sets <code>hardOverride = true</code>. Set \(S_{\text{instant}} = S_{\text{override}}\).</p>
+
+    <h3>4.6 Step 6: Composite Smoothing (EMA) with Emergency Reset</h3>
+    <p>If <code>hardOverride</code> is true, \(S_{\text{final}} = S_{\text{instant}}\) and the composite EMA state is <strong>not</strong> updated (bypass).</p>
+    <p>Otherwise, apply time‑aware EMA to the composite score:</p>
+    \[
+    \alpha_{\text{comp}}(t) = 
+    \begin{cases}
+    1 - \exp\!\left(-\dfrac{\Delta t}{\tau_{\text{comp}}}\right) & \tau_{\text{comp}} \text{ provided and } \Delta t > 0 \\
+    \alpha_{\text{comp}}^{\text{fixed}} & \text{otherwise}
+    \end{cases}
+    \]
+    \[
+    S_{\text{final}}(t) = \alpha_{\text{comp}}(t) \cdot S_{\text{instant}} + \bigl(1 - \alpha_{\text{comp}}(t)\bigr) \cdot \bar S_{\text{comp}}(t-1)
+    \]
+    <p><strong>Emergency reset rule:</strong> When the override level transitions from <code>emergency</code> to any lower level, the composite EMA state is immediately reset: \(\bar S_{\text{comp}}(t) = S_{\text{instant}}\) and its timestamp is set to the current time. This prevents the EMA from artificially keeping the score elevated after the emergency has cleared.</p>
+
+    <h3>4.7 Step 7: Explainability – Contribution Percentages</h3>
+    <p>For a given set of scores \(X_i\) (either smoothed or raw), the weighted contribution uses the <strong>same effective confidence</strong> as fusion:</p>
+    \[
+    C_i = X_i \cdot w_i \cdot c_i^{\text{eff}}, \quad c_i^{\text{eff}} = \max(c_i^{\text{raw}}, \text{softFloor})
+    \]
+    <p>Total \(C_{\text{total}} = \sum_i C_i\). The percentage contribution is:</p>
+    \[
+    P_i = \frac{C_i}{C_{\text{total}}} \times 100\%
+    \]
+    <p>Percentages are rounded in descending order of \(C_i\) (largest first) to ensure \(\sum P_i = 100\%\) exactly, with the last module receiving the remainder. The top two drivers (largest \(P_i\)) are reported for both smoothed and instant scores.</p>
+
+    <!-- 5. Alert level -->
+    <h2>5. Alert Level Mapping</h2>
+    <p>Based on final composite score \(S_{\text{final}}\):</p>
+    \[
+    \text{AlertLevel} =
+    \begin{cases}
+    \text{EMERGENCY} & S_{\text{final}} \ge 90 \\
+    \text{CRITICAL}  & 80 \le S_{\text{final}} < 90 \\
+    \text{HIGH}      & 70 \le S_{\text{final}} < 80 \\
+    \text{MEDIUM}    & 50 \le S_{\text{final}} < 70 \\
+    \text{LOW}       & 30 \le S_{\text{final}} < 50 \\
+    \text{NOMINAL}   & S_{\text{final}} < 30
+    \end{cases}
+    \]
+
+    <!-- 6. Robustness -->
+    <h2>6. Robustness &amp; Numerical Safeguards</h2>
+    <table>
+        <thead><tr><th>Operation</th><th>Safeguard</th></tr></thead>
+        <tbody>
+            <tr><td>Input sanitisation</td><td><code>toFiniteNumber</code> replaces non‑finite values with fallback (0 unless specified).</td></tr>
+            <tr><td>Score clamping</td><td>All risk scores clamped to \([0,100]\) after every calculation.</td></tr>
+            <tr><td>Confidence clamping</td><td>Raw confidences clamped to \([0,1]\); effective confidence floored at <code>confidenceSoftFloor</code> (0.2).</td></tr>
+            <tr><td>Exclusion gate</td><td>Modules with \(c_i^{\text{raw}} < 0.1\) are removed from fusion.</td></tr>
+            <tr><td>Division by zero</td><td>Fusion fallback to average of module raw scores if denominator < 0.01.</td></tr>
+            <tr><td>Weight validation</td><td>Weights must be finite, non‑negative, and sum > 0.</td></tr>
+            <tr><td>EMA time constants</td><td>Must be > 0 if provided; otherwise fallback to fixed alpha.</td></tr>
+            <tr><td>Configuration validation</td><td>Thresholds, floors, blending weights, physical constants validated at engine creation.</td></tr>
+        </tbody>
+    </table>
+
+    <!-- 7. Key Config Parameters -->
+    <h2>7. Key Configuration Parameters</h2>
+    <table>
+        <thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead>
+        <tbody>
+            <tr><td><code>maxDistanceKm</code></td><td>5</td><td>Max threat distance for normalisation [km]</td></tr>
+            <tr><td><code>maxRigTension</code></td><td>500</td><td>Max rig tension [kN]</td></tr>
+            <tr><td><code>defaultStuckThreshold</code></td><td>80</td><td>Radioactive stuck threshold [kN]</td></tr>
+            <tr><td><code>defaultSafeDepth</code></td><td>500</td><td>Explosive safe depth [m]</td></tr>
+            <tr><td><code>minModuleConfidence</code></td><td>0.1</td><td>Exclusion threshold for module confidence</td></tr>
+            <tr><td><code>confidenceSoftFloor</code></td><td>0.2</td><td>Minimum effective confidence for weighting</td></tr>
+            <tr><td><code>minConfidence</code></td><td>0.40</td><td>Global data quality gate (normalised confidence threshold)</td></tr>
+            <tr><td><code>thresholds</code></td><td>{warning:70, critical:80, emergency:90}</td><td>Override thresholds</td></tr>
+            <tr><td><code>floors</code></td><td>{warning:65, critical:75, emergency:85}</td><td>Minimum composite after override</td></tr>
+            <tr><td><code>opsBlend</code></td><td>{maxWeight:0.60, avgWeight:0.40}</td><td>Blending for Ops normalisation</td></tr>
+            <tr><td><code>vehicleBlend</code></td><td>{maxWeight:0.60, avgWeight:0.40}</td><td>Blending for Vehicle normalisation</td></tr>
+            <tr><td><code>emaAlpha</code> / <code>emaTauMs</code></td><td>Per‑module values (see code)</td><td>EMA smoothing parameters (fixed or time‑aware)</td></tr>
+        </tbody>
+    </table>
+
+    <!-- 8. Pipeline summary -->
+    <h2>8. Summary of the Complete Inference Pipeline</h2>
+    <ol>
+        <li><strong>Normalisation</strong> – Compute \(S_i^{\text{raw}}\) for each module using domain formulas (Layer 1).</li>
+        <li><strong>Raw Confidence</strong> – Compute \(c_i^{\text{raw}}\) from recency, health, visibility, model confidence.</li>
+        <li><strong>Per‑Module EMA</strong> – Obtain \(S_i^{\text{smooth}}\) using time‑aware \(\alpha_i(t)\).</li>
+        <li><strong>Confidence‑Weighted Fusion</strong> – Compute \(S_{\text{raw}}\) with effective confidences \(c_i^{\text{eff}} = \max(c_i^{\text{raw}}, \text{softFloor})\). Exclude modules below <code>minModuleConfidence</code>.</li>
+        <li><strong>Multi‑Level Override</strong> – Determine \(S_{\text{override}}\) based on \(\max(S_i^{\text{raw}}, S_i^{\text{smooth}})\). Emergency sets <code>hardOverride = true</code>.</li>
+        <li><strong>Composite EMA</strong> – Smooth \(S_{\text{override}}\) to \(S_{\text{final}}\) (unless emergency hard override). Handle emergency exit reset.</li>
+        <li><strong>Explainability</strong> – Calculate contribution percentages using \(c_i^{\text{eff}}\) (same as fusion). Report top two drivers.</li>
+        <li><strong>Alert Level</strong> – Map \(S_{\text{final}}\) to a discrete level.</li>
+    </ol>
+
+    <div class="note-box">
+        <strong>✅ Verification note:</strong> This specification now matches the updated JavaScript implementation. Key corrections include: contributions using effective confidence, unconditional radioactive tension override, clarified fusion fallback, documented emergency EMA reset, and step numbering alignment.
+    </div>
+
+    <footer>
+        SiteShield.ai — AI-CRV Composite Risk Verification — Patent Pending<br>
+        Corrected Mathematical Specification v2.1 — Fully aligned with JS engine.
+    </footer>
+</div>
+</body>
+</html>
