@@ -323,7 +323,7 @@ function App() {
       <footer>
         <div className="shell foot-inner">
           <div>SITESHIELD360 · COMPOSITE RISK VERIFICATION</div>
-          <div>FALCON DYNAMICS · CONFIDENTIAL</div>
+          <div>SITESHIELD360</div>
         </div>
       </footer>
 
